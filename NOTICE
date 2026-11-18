@@ -1,0 +1,10 @@
+CrossTAK — a CloudTAK plugin
+Copyright (C) 2026 takwerx
+
+Licensed under the GNU Affero General Public License v3.0 or later (see LICENSE).
+
+This project was scaffolded from dfpc-coe's CloudTAK plugin Sample template
+(https://github.com/dfpc-coe/CloudTAK-Plugin-Sample). Portions derived from it (the
+plugin scaffold and build configuration in plugin/) remain under the MIT License, Copyright (c) 2026
+State of Colorado - DFPC - Center of Excellence. The full MIT text is in
+LICENSES/MIT-dfpc-coe-CloudTAK-Plugin-Sample.txt.
