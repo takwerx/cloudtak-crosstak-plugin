@@ -190,6 +190,25 @@ function tlsCode(err: unknown): string {
     return '';
 }
 
+// altnameMessage:begin (the test in test/altname-message.test.mjs cuts this block out by marker)
+// Status text for a certificate whose names do not match. Says what the certificate names,
+// where to fix it (Edit on the server card) and what to type. The suggested name comes from
+// the remote certificate, so only plain host names are echoed; the CA is verified either way.
+function altnameMessage(subjectaltname: string | undefined, expectedName: string | null): string {
+    const sans = String(subjectaltname || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const dns = sans.filter((s) => s.startsWith('DNS:')).map((s) => s.slice(4)).filter((n) => /^[A-Za-z0-9.\-]+$/.test(n) && n.length <= 253);
+    const names = dns.length ? dns.join(', ') : '';
+    const head = 'TLS pin failed: ERR_TLS_CERT_ALTNAME_INVALID';
+    if (expectedName) {
+        return `${head} — the certificate names ${names || 'something else'}, not "${expectedName}". Click Edit on this server and fix "Expected certificate name"${dns.length ? ` (the certificate names ${dns[0]})` : ''}.`;
+    }
+    if (dns.length) {
+        return `${head} — the server's certificate is named ${names}, not the address you typed. Click Edit on this server, then enter ${dns[0]} in "Expected certificate name". The CA is still verified.`;
+    }
+    return `${head} — the server's certificate does not name the address you typed. Click Edit on this server and set "Expected certificate name" to the name on its certificate.`;
+}
+// altnameMessage:end
+
 // The linked server refusing OUR certificate (TLS alert from its side). Retrying cannot fix
 // it: the owner must enroll again (expired) or ask that agency (revoked / not trusted).
 const PEER_REFUSED: Record<string, string> = {
@@ -631,7 +650,9 @@ class Stream {
             if (!ok) {
                 this.status.rejected = true;
                 this.status.verified = false;
-                this.status.error = `TLS pin failed: ${String(code || 'no socket')}${names ? ` — the certificate names ${names}` : ''}`;
+                this.status.error = String(code) === 'ERR_TLS_CERT_ALTNAME_INVALID'
+                    ? altnameMessage(names, this.row.expected_name)
+                    : `TLS pin failed: ${String(code || 'no socket')}${names ? ` — the certificate names ${names}` : ''}`;
                 logError(this.id, `REJECTED ${String(code || 'no socket')}`);
                 this.disconnect('rejected');
                 return;
@@ -697,9 +718,10 @@ class Stream {
         const code = tlsCode(err);
         if (code) {
             const peer = (err as { cert?: { subjectaltname?: string } } | undefined)?.cert;
-            const names = code === 'ERR_TLS_CERT_ALTNAME_INVALID' && peer && peer.subjectaltname ? ` — the certificate names ${peer.subjectaltname}; set the expected certificate name` : '';
             this.status.rejected = true;
-            this.status.error = `TLS pin failed: ${code}${names}`;
+            this.status.error = code === 'ERR_TLS_CERT_ALTNAME_INVALID'
+                ? altnameMessage(peer?.subjectaltname, this.row.expected_name)
+                : `TLS pin failed: ${code}`;
             logError(this.id, `REJECTED ${code}`);
             this.disconnect('rejected');
             return;
