@@ -9,8 +9,3 @@ declare module '*.svg' {
     const content: string;
     export default content;
 }
-
-declare module '*/Crosstak.svg' {
-    const content: string;
-    export default content;
-}
