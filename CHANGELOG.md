@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1
+
+- **Light and dark mode.** The CrossTAK menu icon now follows CloudTAK's theme, so it no longer
+  disappears on the dark panel. The close buttons on alert messages are readable in the light
+  theme.
+- **Clearer certificate name message.** If a linked server's certificate names something other
+  than the address you typed (infra-TAK servers name `takserver`), the server card now says so.
+  It tells you to click Edit on that server and which name to type in "Expected certificate
+  name". The certificate authority is still checked.
+
 ## 0.6.0 (first public release)
 
 CrossTAK shows other agencies' TAK Servers on your CloudTAK map. Each user links the servers
