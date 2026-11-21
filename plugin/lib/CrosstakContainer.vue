@@ -118,7 +118,7 @@
                 >
                     <span class='flex-grow-1'>{{ actionError }}</span>
                     <button
-                        class='btn-close btn-close-white ms-2'
+                        class='btn-close ms-2'
                         aria-label='Dismiss'
                         @click='actionError = ""'
                     />
@@ -129,7 +129,7 @@
                 >
                     <span class='flex-grow-1'>{{ actionInfo }}</span>
                     <button
-                        class='btn-close btn-close-white ms-2'
+                        class='btn-close ms-2'
                         aria-label='Dismiss'
                         @click='actionInfo = ""'
                     />
