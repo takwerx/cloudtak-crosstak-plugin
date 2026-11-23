@@ -50,7 +50,7 @@
                 v-model='form.expected_name'
                 label='Expected certificate name (optional)'
                 placeholder='takserver'
-                description='Only if the status says the certificate names something else. The CA is still verified.'
+                description='Fill this in if the server card later says "TLS pin failed ... certificate names ...". Enter the name it shows (for example takserver). You can also set it later with Edit. The CA is still verified.'
                 class='mb-2'
             />
             <TablerInput

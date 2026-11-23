@@ -6,7 +6,7 @@ they work in one CloudTAK instead of one per agency. Each **linked server** is a
 directly enrolled connection, not federation: the linked servers never see each other, and your
 home TAK Server receives nothing from them.
 
-Status: pre-release (v0.6.0). Tested on CloudTAK 13.123 with TAK Server 5.8 linked servers.
+Status: pre-release (v0.6.1). Tested on CloudTAK 13.123 with TAK Server 5.8 linked servers.
 
 ## Install
 
@@ -86,8 +86,10 @@ certificate there) or a CA you paste, and pins the CA chain the server hands bac
 unencrypted key. Without a client certificate, use Enroll afterwards.
 
 `expected_name`: set it only when the server's 8089/8443 certificate does not name the host
-you linked (infra-TAK TAK Servers present `DNS:takserver`). The status line shows the names
-the certificate carries when this happens. The CA chain is still verified; the plugin accepts
+you linked (infra-TAK TAK Servers present `DNS:takserver`). When this happens the server card
+shows "TLS pin failed: ERR_TLS_CERT_ALTNAME_INVALID" with the name the certificate carries.
+Click Edit on that server, type that name in "Expected certificate name" and save; the link
+retries at once. You can also set it up front under "Show advanced" when you link. The CA chain is still verified; the plugin accepts
 the handshake only when the sole error is the name mismatch and the certificate matches
 `expected_name`.
 

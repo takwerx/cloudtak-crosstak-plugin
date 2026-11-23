@@ -2,14 +2,14 @@
 // CrossTAK — CloudTAK web plugin (UI only; all ingest is server-side, see server/)
 // Copyright (C) 2026 TAKWERX
 import type { App } from 'vue';
-import { h } from 'vue';
+import { h, markRaw } from 'vue';
 import type { PluginAPI, PluginInstance } from '../../plugin.ts';
+import { IconAccessPoint } from '@tabler/icons-vue';
 // CloudTAK's own menu frame (same as its Channels / Data Sync menus): header, theme and
 // scrolling match the host. Our old copy drew dark-on-dark in the light theme and did not
 // scroll to the end (operator 2026-11-17).
 import MenuTemplate from '../../src/components/CloudTAK/util/MenuTemplate.vue';
 import CrosstakContainer from './lib/CrosstakContainer.vue';
-import IconCrosstakUrl from './lib/Crosstak.svg';
 import { useMapStore } from '../../src/stores/map.ts';
 import { sendSelf, health } from './lib/crosstak-client.ts';
 import { installSendHijack } from './lib/send-hijack.ts';
@@ -19,13 +19,11 @@ const ROUTE_NAME = 'home-menu-plugin-crosstak';
 const SELF_MS = 10_000;           // W11: own position to linked servers, like an ATAK PLI
 const LINKS_RECHECK_MS = 60_000;  // how often we re-ask whether this user has any links
 
-const IconCrosstak = {
-    render: () => h('img', {
-        src: IconCrosstakUrl,
-        width: 32,
-        height: 32
-    })
-};
+// Tabler icon component, like CloudTAK's own menu items and the Dispatcher: the host passes
+// size, colour and stroke, so it follows light and dark mode. (An <img> of an SVG with a
+// fixed black stroke ignored the theme and vanished on dark.)
+type MenuIcon = NonNullable<Parameters<PluginAPI['menu']['add']>[0]['icon']>;
+const IconCrosstak = markRaw(IconAccessPoint) as unknown as MenuIcon;
 
 export default class CrosstakPlugin implements PluginInstance {
     api: PluginAPI;
