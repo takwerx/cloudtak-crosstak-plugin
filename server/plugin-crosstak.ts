@@ -931,6 +931,8 @@ class Manager {
             if (!s.pending.size) continue;
             const feats = [...s.pending.values()];
             s.pending.clear();
+            // A link switched off sends nothing more: its markers were just cleared from the map.
+            if (!s.row.enabled) continue;
             const owner = s.row.owner;
             if (!owner || !this.recipients.has(owner)) continue;
             for (const feat of feats) {
@@ -1002,6 +1004,7 @@ class Manager {
         const owner = s.row.owner;
         if (!sub || !owner || !this.recipients.has(owner)) return 0;
         const res = await withChannelApi(s.row, async (api) => await api.Mission.latestFeats(name, sub.token ? { token: sub.token } : {}));
+        if (!s.row.enabled) return 0; // switched off while the feed was loading
         const minStale = Date.now() + MISSION_STALE_MS;
         let n = 0;
         for (const feat of (res && res.features) || []) {
