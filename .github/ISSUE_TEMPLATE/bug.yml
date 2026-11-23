@@ -16,7 +16,7 @@ body:
     attributes:
       label: "CrossTAK plugin version"
       description: "Release tag or commit you installed."
-      placeholder: "e.g. v0.6.0"
+      placeholder: "e.g. v0.6.1"
     validations:
       required: true
   - type: input
