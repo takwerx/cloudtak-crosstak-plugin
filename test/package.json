@@ -1,0 +1,11 @@
+{
+    "name": "cloudtak-plugin-crosstak-tests",
+    "private": true,
+    "type": "module",
+    "description": "Packages the Share-hook test runs against (the real Vue, Pinia and Comlink CloudTAK uses). Run: npm ci --prefix test && node --test test/*.test.mjs",
+    "devDependencies": {
+        "comlink": "^4.4.2",
+        "pinia": "^4.0.0",
+        "vue": "^3.5.26"
+    }
+}
