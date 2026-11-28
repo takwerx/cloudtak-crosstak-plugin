@@ -13,17 +13,12 @@
 //
 // Not covered: Share of several features or of a feature with attachments (CloudTAK builds a
 // data package server-side, PUT /api/marti/package), and chat. Those still go home only.
-import { markRaw } from 'vue';
+import { computed, isRef, markRaw, toRaw } from 'vue';
 import { sendFeature } from './crosstak-client.ts';
 
 const LINKED_UID = /^crosstak:(\d+):(.+)$/;
-const RECHECK_MS = 5_000;
 
 type SendCOT = (feat: unknown, ...rest: unknown[]) => Promise<unknown>;
-
-interface StoreWithWorker {
-    _worker?: unknown;
-}
 
 interface Dest {
     uid?: unknown;
@@ -73,47 +68,66 @@ function makeSendCOT(original: SendCOT): SendCOT {
     };
 }
 
-// Wrap the store's Comlink worker in a Proxy that hands out our sendCOT and forwards
-// everything else untouched. Re-applied whenever CloudTAK replaces the worker (re-login).
+// Put our sendCOT in front of CloudTAK's worker.
+//
+// Share reads the worker through the map store's `worker` getter every time it sends
+// (`mapStore.worker.conn.sendCOT(...)`). That getter exists in every CloudTAK we support
+// (13.102 to now), but where the worker itself lives has changed: up to 14.4.0 it is in the
+// store state (`_worker`), from 14.4.1 it is a module variable no plugin can reach. So we do
+// not touch the worker's home. We replace the getter itself: Pinia keeps each getter as a
+// computed ref on the store, and ours reads CloudTAK's original and hands out the worker in a
+// Proxy that swaps in our sendCOT and forwards everything else untouched. Because ours reads
+// the original every time, it follows a new worker after a logout and login on its own.
 export function installSendHijack(mapStore: unknown): () => void {
-    const store = mapStore as StoreWithWorker;
-    let installedOn: unknown = undefined;
-    let ours: unknown = undefined;
+    const raw = toRaw(mapStore) as Record<string, unknown> | null;
+    const original = raw ? raw.worker : undefined;
+    if (!raw || !isRef(original)) {
+        console.warn(
+            'CrossTAK: this CloudTAK has no map store worker I can hook, so Share to a person on a '
+            + 'linked server will not work. Use Send in the CrossTAK pane instead.'
+        );
+        return () => { /* nothing was installed */ };
+    }
 
-    const apply = () => {
-        const current = store._worker;
-        if (!current || current === ours) return;
-        const raw = current as Record<string | symbol, unknown>;
-        const conn = raw.conn as Record<string | symbol, unknown>;
-        const original: SendCOT = (feat, ...rest) => (conn.sendCOT as SendCOT)(feat, ...rest);
-        const sendCOT = makeSendCOT(original);
-        const connProxy = new Proxy(conn, {
-            get(target, prop, receiver) {
-                if (prop === 'sendCOT') return sendCOT;
-                return Reflect.get(target, prop, receiver);
-            },
-        });
-        const workerProxy = new Proxy(raw, {
-            get(target, prop, receiver) {
-                if (prop === 'conn') return connProxy;
-                return Reflect.get(target, prop, receiver);
-            },
-        });
-        installedOn = current;
-        ours = markRaw(workerProxy);
-        store._worker = ours;
-    };
-
-    apply();
-    const timer = setInterval(() => {
-        try { apply(); } catch { /* worker not started yet */ }
-    }, RECHECK_MS);
+    const wrapped = new WeakMap<object, unknown>();
+    const ours = markRaw(computed(() => {
+        // Reading the original throws CloudTAK's own "worker has not yet started" until it has.
+        const current = (original as { value: unknown }).value;
+        if (!current || (typeof current !== 'object' && typeof current !== 'function')) return current;
+        let proxy = wrapped.get(current);
+        if (!proxy) {
+            try {
+                proxy = markRaw(wrapWorker(current as Record<string | symbol, unknown>) as object);
+            } catch {
+                // Never put CloudTAK's own worker at risk: if we cannot wrap it, hand it out as it is.
+                proxy = current;
+            }
+            wrapped.set(current, proxy);
+        }
+        return proxy;
+    }));
+    raw.worker = ours;
 
     return () => {
-        clearInterval(timer);
-        // Put the original back only if nobody replaced it meanwhile.
-        if (store._worker === ours && installedOn) store._worker = installedOn;
-        installedOn = undefined;
-        ours = undefined;
+        // Put the original back only if nobody replaced ours meanwhile.
+        if (raw.worker === ours) raw.worker = original;
     };
+}
+
+function wrapWorker(worker: Record<string | symbol, unknown>): unknown {
+    const conn = worker.conn as Record<string | symbol, unknown>;
+    const original: SendCOT = (feat, ...rest) => (conn.sendCOT as SendCOT)(feat, ...rest);
+    const sendCOT = makeSendCOT(original);
+    const connProxy = new Proxy(conn, {
+        get(target, prop, receiver) {
+            if (prop === 'sendCOT') return sendCOT;
+            return Reflect.get(target, prop, receiver);
+        },
+    });
+    return new Proxy(worker, {
+        get(target, prop, receiver) {
+            if (prop === 'conn') return connProxy;
+            return Reflect.get(target, prop, receiver);
+        },
+    });
 }
