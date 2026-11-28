@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Runtime bundle (CloudTAK 14.2 and later).** `bundle/` builds CrossTAK as one uploadable
+  bundle, so it can also load on the iPhone and Android CloudTAK apps. It does nothing when the
+  compiled-in CrossTAK is there, and says so plainly when the server part does not match. The
+  Marketplace source install is unchanged.
+
 ## 0.6.1
 
 - **Light and dark mode.** The CrossTAK menu icon now follows CloudTAK's theme, so it no longer

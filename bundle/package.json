@@ -1,0 +1,11 @@
+{
+    "name": "cloudtak-plugin-crosstak-bundle",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "description": "The only third-party code that goes into the CrossTAK runtime bundle. Pinned by package-lock.json; the build installs it with npm ci.",
+    "license": "AGPL-3.0-or-later",
+    "dependencies": {
+        "@tabler/icons-vue": "3.53.0"
+    }
+}
