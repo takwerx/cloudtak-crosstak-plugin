@@ -7,9 +7,12 @@
 // Builds bundle/entry.ts and the plugin/lib panes into one ES module and packs it with a
 // manifest into crosstak-<version>.tar.gz, ready for POST /api/plugin/bundle on CloudTAK 14.2+.
 //
-// The CloudTAK checkout is only the tool box: its node_modules give Vite, the Vue compiler and
-// the icon set, as plugin/ already type-checks against it. Nothing of CloudTAK's own source is
-// copied into the bundle. `vue`, `vue-router` and `@tak-ps/vue-tabler` stay out of the file:
+// The CloudTAK checkout is only the tool box: its node_modules give Vite and the Vue compiler.
+// Nothing of CloudTAK's own source is copied into the bundle. The one third-party package that
+// does go into the file (the icon set) is installed from bundle/package-lock.json with
+// `npm ci` (Security condition 4, ops #1410): the build stops if it is not there, or if a
+// bundled package differs from the lock. The build also writes the list of bundled packages
+// (crosstak-<version>.deps.json, for the release SBOM) and the sha256 of the archive. `vue`, `vue-router` and `@tak-ps/vue-tabler` stay out of the file:
 // they are read from globalThis.__CLOUDTAK__ at run time, so the bundle and the app share one
 // Vue. CloudTAK's `std`, map store and menu frame cannot be imported by a bundle, so
 // bundle/shims/ replaces them.
@@ -18,6 +21,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { makeTarball, sha256 } from './pack.mjs';
+import { bundledPackages, checkAgainstLock } from './deps.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '..');
@@ -88,10 +92,14 @@ export async function buildBundle({ cloudtak, out }) {
             if (/\/src\/std\.ts$/.test(spec)) return shim('std.ts');
             if (/\/src\/stores\/map\.ts$/.test(spec)) return shim('map-store.ts');
             if (spec.startsWith('@crosstak/')) return path.join(repo, 'plugin', spec.slice('@crosstak/'.length));
-            // any other bare import (the icon set) is looked up from the CloudTAK checkout
+            // any other bare import (the icon set) is looked up in bundle/node_modules, which
+            // `npm ci` fills from bundle/package-lock.json. Never from the CloudTAK checkout.
             if (!spec.startsWith('.') && !spec.startsWith('/') && !spec.startsWith('\0') && !spec.startsWith('virtual:')) {
-                const r = await this.resolve(spec, path.join(app, 'src/main.ts'), { ...opts, skipSelf: true });
-                return r || null;
+                const r = await this.resolve(spec, path.join(here, 'locked-imports.ts'), { ...opts, skipSelf: true });
+                if (!r || !r.id.startsWith(path.join(here, 'node_modules') + path.sep)) {
+                    throw new Error(`CrossTAK bundle: "${spec}" is not in bundle/node_modules. Run: npm ci --prefix bundle`);
+                }
+                return r;
             }
             return null;
         },
@@ -141,13 +149,21 @@ export async function buildBundle({ cloudtak, out }) {
     const bare = /(^|[;\n}])\s*import\s*(?:[\w*${}\s,]+from\s*)?["'][^"']+["']|\bimport\(/.exec(code);
     if (bare) throw new Error(`the bundle still has an import: ${bare[0].trim().slice(0, 80)}`);
 
+    // Every third-party package in the file must be the one the lock names (version and hash).
+    const packages = bundledPackages(Object.keys(chunk.modules || {}), path.join(here, 'node_modules'));
+    const lock = JSON.parse(readFileSync(path.join(here, 'package-lock.json'), 'utf8'));
+    const problems = checkAgainstLock(packages, lock);
+    if (problems.length) throw new Error(`the bundle holds packages the lock does not list: ${problems.join('; ')}`);
+
     const index = Buffer.from(code);
     const tarball = makeTarball(index, version);
     mkdirSync(out, { recursive: true });
     const tgz = path.join(out, `crosstak-${version}.tar.gz`);
+    const depsFile = path.join(out, `crosstak-${version}.deps.json`);
     writeFileSync(path.join(out, 'index.js'), index);
     writeFileSync(tgz, tarball);
-    return { version, tgz, indexSha256: sha256(index), bytes: index.length };
+    writeFileSync(depsFile, JSON.stringify({ bundle: `crosstak-${version}.tar.gz`, packages }, null, 2) + '\n');
+    return { version, tgz, depsFile, packages, indexSha256: sha256(index), tgzSha256: sha256(tarball), bytes: index.length };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -159,4 +175,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
     const res = await buildBundle({ cloudtak, out: path.resolve(arg('--out') || path.join(here, 'dist')) });
     console.log(`${res.tgz}\nversion ${res.version}\nindex.js ${res.bytes} bytes sha256 ${res.indexSha256}`);
+    console.log(`bundled packages: ${res.packages.map((p) => `${p.name}@${p.version}`).join(', ') || 'none'} (${res.depsFile})`);
+    console.log(`Release notes line: crosstak-${res.version}.tar.gz sha256 ${res.tgzSha256}`);
 }

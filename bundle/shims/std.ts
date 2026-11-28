@@ -6,6 +6,13 @@
 // the host's std(), so this copy reads the token and the server address the same way and sends
 // the same request. What it leaves out: the host's refresh of an expired login (a 401 here just
 // throws '401', and the host refreshes the stored token on its own schedule).
+//
+// Two rules for the Security review (ops #1410, conditions 1 and 2), each with a test in
+// test/bundle.test.mjs:
+//  - the only stored values this file reads are `token` and `serverUrl`. It never writes or removes
+//    one, and never reads the refresh token, the session id or any other key;
+//  - every request goes to the CloudTAK server's own origin. A full URL that points anywhere else
+//    is refused before anything is sent, so the login token cannot leave for another host.
 interface PreferencesPlugin {
     get(opts: { key: string }): Promise<{ value: string | null }>;
 }
@@ -21,12 +28,17 @@ interface StdOptions {
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+// The only stored keys this bundle reads.
+export const READABLE_KEYS = ['token', 'serverUrl'] as const;
+type ReadableKey = typeof READABLE_KEYS[number];
+
 function preferences(): PreferencesPlugin | undefined {
     const cap = (globalThis as { Capacitor?: { Plugins?: { Preferences?: PreferencesPlugin } } }).Capacitor;
     return cap?.Plugins?.Preferences;
 }
 
-async function pref(key: string): Promise<string | undefined> {
+async function pref(key: ReadableKey): Promise<string | undefined> {
+    if (!READABLE_KEYS.includes(key)) throw new Error('CrossTAK reads only the login token and the server address');
     const p = preferences();
     if (p) {
         const res = await p.get({ key });
@@ -40,12 +52,17 @@ async function pref(key: string): Promise<string | undefined> {
 }
 
 export async function stdurl(url: string | URL): Promise<URL> {
+    const base = (await pref('serverUrl')) || location.origin;
+    let target: URL;
     try {
-        return new URL(url);
+        target = new URL(url);
     } catch {
-        const base = (await pref('serverUrl')) || location.origin;
-        return new URL(base.replace(/\/$/, '') + String(url));
+        target = new URL(base.replace(/\/$/, '') + String(url));
     }
+    if (target.origin !== new URL(base).origin) {
+        throw new Error('CrossTAK sends requests only to your CloudTAK server');
+    }
+    return target;
 }
 
 export async function std(url: string | URL, opts: StdOptions = {}): Promise<unknown> {
