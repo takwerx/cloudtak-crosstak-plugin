@@ -42,7 +42,7 @@ import type ConfigStateless from '../config.js';
 // No route returns them, no log line carries them, and error text that could quote a PEM
 // is replaced before it reaches a response or a log.
 
-const VERSION = '0.6.1';
+const VERSION = '0.6.2';
 const TAG = 'crosstak';
 
 const PRESENCE_POLL_MS = 15_000;     // W7: how often we ask the hub which link owners are on the map
