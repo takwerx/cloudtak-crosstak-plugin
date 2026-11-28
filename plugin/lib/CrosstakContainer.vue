@@ -305,6 +305,7 @@ import {
     homeServerName, errorText, ago, cn,
 } from './crosstak-client.ts';
 import type { LinkedServer } from './crosstak-client.ts';
+import { isFromLink } from './linked-features.ts';
 
 const props = defineProps<{
     api: PluginAPI;
@@ -421,10 +422,36 @@ function closeEnroll() {
     mode.value = 'list';
 }
 
+// Switching a link off takes its markers off this map at once, instead of waiting for them to go
+// stale. Same removal the feed pane uses when you leave a feed.
+async function clearMarkers(serverId: number): Promise<number> {
+    const feats = await props.api.feature.list({ filter: (feat) => isFromLink(feat, serverId) });
+    let n = 0;
+    for (const feat of feats) {
+        try {
+            await mapStore.worker.db.remove(String(feat.id));
+            n++;
+        } catch {
+            // already gone
+        }
+    }
+    return n;
+}
+
+async function clearAfterDisable(s: { id: number; name: string }) {
+    try {
+        const n = await clearMarkers(s.id);
+        if (n) actionInfo.value = `${s.name} is off; removed ${n} marker${n === 1 ? '' : 's'} from the map`;
+    } catch (err) {
+        actionError.value = `${s.name} is off, but its markers could not be removed: ${errorText(err)}`;
+    }
+}
+
 async function onSaved(server: LinkedServer) {
     mode.value = 'list';
     editing.value = null;
     actionInfo.value = `Saved ${server.name}`;
+    if (!server.enabled) await clearAfterDisable(server);
     await refresh();
 }
 
@@ -433,6 +460,7 @@ async function toggle(s: LinkedServer, field: 'enabled', value: boolean) {
     actionError.value = '';
     try {
         await patchServer(s.id, { [field]: value });
+        if (!value) await clearAfterDisable(s);
         await refresh();
     } catch (err) {
         actionError.value = errorText(err);
