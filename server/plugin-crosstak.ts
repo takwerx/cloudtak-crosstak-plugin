@@ -42,7 +42,7 @@ import type ConfigStateless from '../config.js';
 // No route returns them, no log line carries them, and error text that could quote a PEM
 // is replaced before it reaches a response or a log.
 
-const VERSION = '0.6.1';
+const VERSION = '0.6.2';
 const TAG = 'crosstak';
 
 const PRESENCE_POLL_MS = 15_000;     // W7: how often we ask the hub which link owners are on the map
@@ -931,6 +931,8 @@ class Manager {
             if (!s.pending.size) continue;
             const feats = [...s.pending.values()];
             s.pending.clear();
+            // A link switched off sends nothing more: its markers were just cleared from the map.
+            if (!s.row.enabled) continue;
             const owner = s.row.owner;
             if (!owner || !this.recipients.has(owner)) continue;
             for (const feat of feats) {
@@ -1002,6 +1004,7 @@ class Manager {
         const owner = s.row.owner;
         if (!sub || !owner || !this.recipients.has(owner)) return 0;
         const res = await withChannelApi(s.row, async (api) => await api.Mission.latestFeats(name, sub.token ? { token: sub.token } : {}));
+        if (!s.row.enabled) return 0; // switched off while the feed was loading
         const minStale = Date.now() + MISSION_STALE_MS;
         let n = 0;
         for (const feat of (res && res.features) || []) {

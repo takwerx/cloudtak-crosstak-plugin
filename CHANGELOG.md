@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.2
+
+- **Share to a person on a linked server works again.** On CloudTAK 14.4.1 and newer, choosing
+  Share on a person who came from a linked server did nothing. It now sends the point to that
+  person over the link, as it did on older CloudTAK. Sharing to people on your home server is
+  unchanged. (Until you update, use Send in the CrossTAK pane.)
+- **Switching a linked server off clears its markers.** Before, the markers stayed on the map
+  after you turned a linked server off. Now they leave the map at once. Markers from your other
+  links stay. Turn the server back on and its markers come back.
+- Repository checks only (no change for users): CodeQL and OpenSSF Scorecard scans, pinned
+  GitHub Actions and a read-only token.
+
 ## 0.6.1
 
 - **Light and dark mode.** The CrossTAK menu icon now follows CloudTAK's theme, so it no longer

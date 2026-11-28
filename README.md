@@ -6,7 +6,7 @@ they work in one CloudTAK instead of one per agency. Each **linked server** is a
 directly enrolled connection, not federation: the linked servers never see each other, and your
 home TAK Server receives nothing from them.
 
-Status: pre-release (v0.6.1). Tested on CloudTAK 13.123 with TAK Server 5.8 linked servers.
+Status: pre-release (v0.6.2). Tested on CloudTAK 14.2 and 14.4 with TAK Server 5.8 linked servers.
 
 ## Install
 
