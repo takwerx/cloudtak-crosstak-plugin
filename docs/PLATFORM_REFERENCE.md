@@ -41,3 +41,18 @@ in `app/src/plugin-loader.ts`), and `disable()` first on every page load. A prof
 sync fails never gets a booted map, so no plugin is enabled: a browser test must sign in as a
 profile whose `GET /api/marti/group` answers 200. ✅ verified 2026-11-27 (a profile without a
 working TAK certificate gave "Failed to sync groups" and no CrossTAK menu).
+
+## Share dialog and linked people (ops #1447)
+
+- CloudTAK's Share dialog lists people from its contact list. A person seen through a link shows up
+  there with the callsign they announced on the linked server (their uid is `crosstak:<link>:<uid>`).
+  The dialog calls `mapStore.worker.conn.sendCOT(feature)` with `properties.dest = [{uid}, ...]`.
+  ✅ verified 2026-11-28 on CloudTAK 14.2.0 and 14.4.2: with CrossTAK 0.6.2, picking a linked person and
+  pressing Share makes one `POST /api/crosstak/send`, and that person, on a second TAK Server, receives the
+  point. A home contact in the same Share gets it from the home server, and a Broadcast stays home.
+- On CloudTAK 14.4.2 with CrossTAK 0.6.0 or 0.6.1 the same click makes no request (✅ verified 2026-11-28).
+- CloudTAK 14.2.0 only: an in-app sign-out (router to `/login` and back) throws
+  `Maximum call stack size exceeded`, and the Share button cannot be opened until the page is reloaded.
+  ✅ verified 2026-11-28 on 14.2.0 with CrossTAK uninstalled, so it is CloudTAK's own bug. 14.4.2 is fine.
+- After a sign-in, a linked person is in the contact list again within one announce interval (about
+  20 s) of the linked server. A browser test must wait for it before it opens Share.
